@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection.Emit;
 using BepInEx;
+using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
@@ -17,10 +18,26 @@ namespace FasterEndOfMonths
     public class Plugin : BaseUnityPlugin
     {
         static ManualLogSource logger;
+        static ConfigEntry<int> autosaveFrequency;
+        static ConfigEntry<bool> disableDebugAutosave;
 
         private void Awake()
         {
             logger = Logger;
+            autosaveFrequency = Config.Bind(
+                "General",
+                "AutosaveFrequency",
+                1,
+                "How often to save at the end of the moon (every x moons). "
+                    + "By default the game saves every moon which helps prevent data loss (if the game or your PC crashes) but it also makes the cutscene lag."
+                    + "Set to a large number to never save."
+            );
+            disableDebugAutosave = Config.Bind(
+                "General",
+                "DisableDebugAutosave",
+                true,
+                "By default, the game creates additional versioned backup saves at the end of the moon. Disabling them reduces the short lag-spike at the end of each moon."
+            );
             Harmony.CreateAndPatchAll(typeof(Plugin));
         }
 
@@ -32,25 +49,84 @@ namespace FasterEndOfMonths
             __result = FeedVillagers();
         }
 
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(WorldManager), nameof(WorldManager.EndOfMonthRoutine))]
+        public static void EndOfMonthRoutinePrefix(ref EndOfMonthParameters param)
+        {
+            param.SkipEndConfirmation = true;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(WorldManager), nameof(WorldManager.EndOfMonth))]
+        public static void RememberSpeedUp(WorldManager __instance, out float __state)
+        {
+            __state = __instance.SpeedUp;
+        }
+
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(WorldManager), nameof(WorldManager.EndOfMonth))]
+        public static void RestoreSpeedUp(WorldManager __instance, float __state)
+        {
+            __instance.SpeedUp = __state;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(WorldManager), nameof(WorldManager.Save), new[] { typeof(bool) })]
+        public static void DisableSave(out bool __runOriginal)
+        {
+            __runOriginal = WorldManager.instance.CurrentMonth % autosaveFrequency.Value == 0;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(DebugScreen), nameof(DebugScreen.AutoSave))]
+        public static void DisableDebugAutoSave(out bool __runOriginal)
+        {
+            __runOriginal = !disableDebugAutosave.Value;
+        }
+
+        [HarmonyTranspiler]
+        [HarmonyPatch(
+            typeof(EndOfMonthCutscenes),
+            nameof(EndOfMonthCutscenes.SpecialEvents),
+            MethodType.Enumerator
+        )]
+        public static IEnumerable<CodeInstruction> NoWaitForSecondsInSpecialEvents(
+            IEnumerable<CodeInstruction> instructions
+        )
+        {
+            var waitForSecondsCtor = typeof(WaitForSeconds).GetConstructor(new[] { typeof(float) });
+            return new CodeMatcher(instructions)
+                .MatchForward(
+                    false,
+                    new CodeMatch(OpCodes.Ldc_R4),
+                    new CodeMatch(OpCodes.Newobj, waitForSecondsCtor)
+                )
+                .Repeat(matcher => matcher.SetOperandAndAdvance(0f))
+                .InstructionEnumeration();
+        }
+
         [HarmonyTranspiler]
         [HarmonyPatch(
             typeof(WorldManager),
             nameof(WorldManager.EndOfMonthRoutine),
             MethodType.Enumerator
         )]
-        public static IEnumerable<CodeInstruction> EndOfMonthRoutinePatch(
+        public static IEnumerable<CodeInstruction> NoWaitForSecondsInEndOfMonth(
             IEnumerable<CodeInstruction> instructions
         )
         {
+            var waitForSecondsCtor = typeof(WaitForSeconds).GetConstructor(new[] { typeof(float) });
             var matcher = new CodeMatcher(instructions).MatchForward(
                 false,
                 new CodeMatch(OpCodes.Ldc_R4),
-                new CodeMatch(OpCodes.Newobj)
+                new CodeMatch(OpCodes.Newobj, waitForSecondsCtor)
             );
             if (matcher.IsValid)
                 matcher.SetOperandAndAdvance(0f);
             else
-                logger.LogWarning("Didn't find WaitForSeconds to patch");
+                logger.LogWarning(
+                    "Didn't find WaitForSeconds to patch in WorldManager.EndOfMonthRoutine"
+                );
             return matcher.InstructionEnumeration();
         }
 

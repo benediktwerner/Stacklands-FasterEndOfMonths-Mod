@@ -1,6 +1,8 @@
 # Stacklands FasterEndOfMonths Mod
 
-Makes eating food instant
+Makes eating food instant and removes the "start month" button.
+
+There also is a configuration option to reduce or disable saving at the end of the month which makes the cutscene almost instant.
 
 ## Manual Installation
 This mod requires BepInEx to work. BepInEx is a modding framework which allows multiple mods to be loaded.
@@ -15,4 +17,7 @@ This mod requires BepInEx to work. BepInEx is a modding framework which allows m
 
 ## Changelog
 
+- v1.1:
+  - Remove "start month" button
+  - Add option to skip saving
 - v1.0: Initial release
