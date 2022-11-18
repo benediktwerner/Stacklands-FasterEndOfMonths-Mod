@@ -26,6 +26,7 @@ This mod requires BepInEx to work. BepInEx is a modding framework which allows m
 
 ## Changelog
 
+- v1.1.1: Load this mod after StoneArch for compatibility
 - v1.1:
   - Remove "start month" button
   - Add option to skip saving

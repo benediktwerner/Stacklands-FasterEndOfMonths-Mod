@@ -15,6 +15,7 @@ namespace FasterEndOfMonths
         PluginInfo.PLUGIN_NAME,
         PluginInfo.PLUGIN_VERSION
     )]
+    [BepInDependency("StoneArch", BepInDependency.DependencyFlags.SoftDependency)]
     public class Plugin : BaseUnityPlugin
     {
         static ManualLogSource logger;
