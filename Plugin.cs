@@ -18,13 +18,13 @@ namespace FasterEndOfMonths
     [BepInDependency("StoneArch", BepInDependency.DependencyFlags.SoftDependency)]
     public class Plugin : BaseUnityPlugin
     {
-        static ManualLogSource logger;
+        static ManualLogSource L;
         static ConfigEntry<int> autosaveFrequency;
         static ConfigEntry<bool> disableDebugAutosave;
 
         private void Awake()
         {
-            logger = Logger;
+            L = Logger;
             autosaveFrequency = Config.Bind(
                 "General",
                 "AutosaveFrequency",
@@ -125,7 +125,7 @@ namespace FasterEndOfMonths
             if (matcher.IsValid)
                 matcher.SetOperandAndAdvance(0f);
             else
-                logger.LogWarning(
+                L.LogWarning(
                     "Didn't find WaitForSeconds to patch in WorldManager.EndOfMonthRoutine"
                 );
             return matcher.InstructionEnumeration();
@@ -162,7 +162,9 @@ namespace FasterEndOfMonths
                 );
                 for (int j = 0; j < foodForVillager; j++)
                 {
-                    Food food = EndOfMonthCutscenes.GetFoodToUseUp();
+                    Food food =
+                        EndOfMonthCutscenes.GetHotpotWithFood()
+                        ?? EndOfMonthCutscenes.GetFoodToUseUp();
                     if (food == null)
                         break;
                     GameCard foodCard = food.MyGameCard;
@@ -177,7 +179,11 @@ namespace FasterEndOfMonths
                         );
                         food.ConsumedBy(combatable);
                     }
-                    if (food.FoodValue <= 0 && food.Id != "compactstorage.food_warehouse")
+                    if (
+                        food.FoodValue <= 0
+                        && food.Id != "compactstorage.food_warehouse"
+                        && food is not Hotpot
+                    )
                     {
                         var originalStack = foodCard.GetAllCardsInStack();
                         foodCard.RemoveFromStack();

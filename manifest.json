@@ -1,7 +1,7 @@
 {
   "name": "FasterEndOfMonths",
   "description": "Makes eating food instant",
-  "version_number": "1.1.1",
+  "version_number": "1.1.2",
   "dependencies": ["BepInEx-BepInExPack_Stacklands-5.4.2100"],
   "website_url": "https://github.com/benediktwerner/Stacklands-FasterEndOfMonths-Mod"
 }
