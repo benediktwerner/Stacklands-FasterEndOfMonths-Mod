@@ -1,45 +1,43 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection.Emit;
-using BepInEx;
-using BepInEx.Configuration;
-using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
 
 namespace FasterEndOfMonths
 {
-    [BepInPlugin(
-        "de.benediktwerner.stacklands.fasterendofmonths",
-        PluginInfo.PLUGIN_NAME,
-        PluginInfo.PLUGIN_VERSION
-    )]
-    [BepInDependency("StoneArch", BepInDependency.DependencyFlags.SoftDependency)]
-    public class Plugin : BaseUnityPlugin
+    public class Plugin : Mod
     {
-        static ManualLogSource L;
+        static ModLogger L;
         static ConfigEntry<int> autosaveFrequency;
         static ConfigEntry<bool> disableDebugAutosave;
+
+        private ConfigEntry<T> CreateConfig<T>(string name, T defaultValue, string description)
+        {
+            return Config.GetEntry<T>(name, defaultValue, new ConfigUI { Tooltip = description });
+        }
 
         private void Awake()
         {
             L = Logger;
-            autosaveFrequency = Config.Bind(
-                "General",
+            autosaveFrequency = CreateConfig(
                 "AutosaveFrequency",
                 1,
                 "How often to save at the end of the moon (every x moons). "
                     + "By default the game saves every moon which helps prevent data loss (if the game or your PC crashes) but it also makes the cutscene lag."
                     + "Set to a large number to never save."
             );
-            disableDebugAutosave = Config.Bind(
-                "General",
+            disableDebugAutosave = CreateConfig(
                 "DisableDebugAutosave",
                 true,
                 "By default, the game creates additional versioned backup saves at the end of the moon. Disabling them reduces the short lag-spike at the end of each moon."
             );
-            Harmony.CreateAndPatchAll(typeof(Plugin));
+            Harmony.PatchAll(typeof(Plugin));
+        }
+
+        public void OnDestroy()
+        {
+            Harmony.UnpatchSelf();
         }
 
         [HarmonyPrefix]
@@ -72,7 +70,7 @@ namespace FasterEndOfMonths
         }
 
         [HarmonyPrefix]
-        [HarmonyPatch(typeof(WorldManager), nameof(WorldManager.Save), new[] { typeof(bool) })]
+        [HarmonyPatch(typeof(SaveManager), nameof(SaveManager.Save), new[] { typeof(bool) })]
         public static void DisableSave(out bool __runOriginal)
         {
             __runOriginal = WorldManager.instance.CurrentMonth % autosaveFrequency.Value == 0;
@@ -136,48 +134,39 @@ namespace FasterEndOfMonths
             AudioManager.me.PlaySound2D(AudioManager.me.Eat, Random.Range(0.8f, 1.2f), 0.3f);
 
             int requiredFoodCount = WorldManager.instance.GetRequiredFoodCount();
-            var villagersToFeed = new List<CardData>();
-            foreach (var card in WorldManager.instance.AllCards)
-            {
-                if (card.MyBoard.IsCurrent && (card.CardData is Villager || card.CardData is Kid))
-                    villagersToFeed.Add(card.CardData);
-            }
-            villagersToFeed = villagersToFeed
-                .OrderBy(x =>
-                {
-                    if (x is Kid)
-                        return 0;
-                    if (x.Id == "dog")
-                        return 1;
-                    return 2;
-                })
-                .ToList<CardData>();
+            var cardsToFeed = EndOfMonthCutscenes.GetCardsToFeed();
 
-            var fedVillagers = new List<CardData>();
-            for (int i = 0; i < villagersToFeed.Count; i++)
+            var fedCards = new List<CardData>();
+            for (int i = 0; i < cardsToFeed.Count; i++)
             {
-                CardData vill = villagersToFeed[i];
+                CardData cardToFeed = cardsToFeed[i];
+                if (cardToFeed is BaseVillager baseVillager)
+                {
+                    baseVillager.AteUncookedFood = false;
+                }
                 int foodForVillager = WorldManager.instance.GetCardRequiredFoodCount(
-                    vill.MyGameCard
+                    cardToFeed.MyGameCard
                 );
                 for (int j = 0; j < foodForVillager; j++)
                 {
-                    Food food =
-                        EndOfMonthCutscenes.GetHotpotWithFood()
-                        ?? EndOfMonthCutscenes.GetFoodToUseUp();
+                    Food food = EndOfMonthCutscenes.GetFoodToUseUp();
                     if (food == null)
                         break;
                     GameCard foodCard = food.MyGameCard;
                     food.FoodValue--;
                     requiredFoodCount--;
-                    Combatable combatable = vill as Combatable;
-                    if (combatable != null)
+                    if (cardToFeed is BaseVillager baseVillager2)
                     {
-                        combatable.HealthPoints = Mathf.Min(
-                            combatable.HealthPoints + 3,
-                            combatable.ProcessedCombatStats.MaxHealth
+                        baseVillager2.HealthPoints = Mathf.Min(
+                            baseVillager2.HealthPoints + 3,
+                            baseVillager2.ProcessedCombatStats.MaxHealth
                         );
-                        food.ConsumedBy(combatable);
+                        food.ConsumedBy(baseVillager2);
+                        EndOfMonthCutscenes.TryCreatePoop(baseVillager2);
+                        if (!food.IsCookedFood)
+                        {
+                            baseVillager2.AteUncookedFood = true;
+                        }
                     }
                     if (
                         food.FoodValue <= 0
@@ -187,14 +176,14 @@ namespace FasterEndOfMonths
                     {
                         var originalStack = foodCard.GetAllCardsInStack();
                         foodCard.RemoveFromStack();
-                        food.FullyConsumed(vill);
+                        food.FullyConsumed(cardToFeed);
                         originalStack.Remove(foodCard);
                         WorldManager.instance.Restack(originalStack);
                         foodCard.DestroyCard(true, true);
                     }
                     if (j == foodForVillager - 1)
                     {
-                        fedVillagers.Add(vill);
+                        fedCards.Add(cardToFeed);
                     }
                 }
             }
@@ -202,9 +191,9 @@ namespace FasterEndOfMonths
             if (requiredFoodCount > 0)
             {
                 var unfedVillagers = new List<CardData>();
-                foreach (CardData cardData in villagersToFeed)
+                foreach (CardData cardData in cardsToFeed)
                 {
-                    if (!fedVillagers.Contains(cardData) && cardData is not Kid)
+                    if (!fedCards.Contains(cardData) && cardData is not Kid)
                         unfedVillagers.Add(cardData);
                 }
                 var humansToDie = unfedVillagers.Count;
@@ -234,7 +223,7 @@ namespace FasterEndOfMonths
                         yield return Cutscenes.WaitForContinueClicked(
                             SokLoc.Translate("label_game_over")
                         );
-                        GameCanvas.instance.SetScreen(GameCanvas.instance.GameOverScreen);
+                        GameCanvas.instance.SetScreen<GameOverScreen>();
                         WorldManager.instance.currentAnimationRoutine = null;
                     }
                     else if (WorldManager.instance.CurrentBoard.Id == "island")
@@ -244,6 +233,12 @@ namespace FasterEndOfMonths
                     else if (WorldManager.instance.CurrentBoard.Id == "forest")
                     {
                         yield return Cutscenes.EveryoneInForestDead();
+                    }
+                    else if (WorldManager.instance.CurrentBoard.BoardOptions.IsSpiritWorld)
+                    {
+                        yield return Cutscenes.EveryoneInSpiritWorldDead(
+                            WorldManager.instance.CurrentBoard.Id
+                        );
                     }
                     else
                     {
