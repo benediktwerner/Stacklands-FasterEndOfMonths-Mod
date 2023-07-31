@@ -24,8 +24,8 @@ namespace FasterEndOfMonths
                 "AutosaveFrequency",
                 1,
                 "How often to save at the end of the moon (every x moons). "
-                    + "By default the game saves every moon which helps prevent data loss (if the game or your PC crashes) but it also makes the cutscene lag."
-                    + "Set to a large number to never save."
+                    + "By default the game saves every moon which helps prevent data loss (if the game or your PC crashes) but it also makes the cutscene lag. "
+                    + "Set to a large number to never save automatically. The game will still be saved when you exit to the menu."
             );
             disableDebugAutosave = CreateConfig(
                 "DisableDebugAutosave",
@@ -34,7 +34,6 @@ namespace FasterEndOfMonths
             );
             Harmony.PatchAll(typeof(Plugin));
         }
-
 
         [HarmonyPrefix]
         [HarmonyPatch(typeof(EndOfMonthCutscenes), nameof(EndOfMonthCutscenes.FeedVillagers))]
@@ -63,13 +62,6 @@ namespace FasterEndOfMonths
         public static void RestoreSpeedUp(WorldManager __instance, float __state)
         {
             __instance.SpeedUp = __state;
-        }
-
-        [HarmonyPrefix]
-        [HarmonyPatch(typeof(SaveManager), nameof(SaveManager.Save), new[] { typeof(bool) })]
-        public static void DisableSave(out bool __runOriginal)
-        {
-            __runOriginal = WorldManager.instance.CurrentMonth % autosaveFrequency.Value == 0;
         }
 
         [HarmonyPrefix]
@@ -123,6 +115,58 @@ namespace FasterEndOfMonths
                     "Didn't find WaitForSeconds to patch in WorldManager.EndOfMonthRoutine"
                 );
             return matcher.InstructionEnumeration();
+        }
+
+        [HarmonyTranspiler]
+        [HarmonyPatch(
+            typeof(WorldManager),
+            nameof(WorldManager.EndOfMonthRoutine),
+            MethodType.Enumerator
+        )]
+        public static IEnumerable<CodeInstruction> ReduceAutosaves(
+            IEnumerable<CodeInstruction> instructions
+        )
+        {
+            var matcher = new CodeMatcher(instructions).MatchForward(
+                false,
+                new CodeMatch(
+                    OpCodes.Ldsfld,
+                    AccessTools.Field(typeof(SaveManager), nameof(SaveManager.instance))
+                ),
+                new CodeMatch(OpCodes.Ldc_I4_1),
+                new CodeMatch(
+                    OpCodes.Callvirt,
+                    AccessTools.Method(
+                        typeof(SaveManager),
+                        nameof(SaveManager.Save),
+                        new[] { typeof(bool) }
+                    )
+                )
+            );
+            if (matcher.IsValid)
+            {
+                matcher.SetInstructionAndAdvance(
+                    new CodeInstruction(
+                        OpCodes.Call,
+                        AccessTools.Method(typeof(Plugin), nameof(EndOfMonthAutosave))
+                    )
+                );
+                matcher.SetInstructionAndAdvance(new CodeInstruction(OpCodes.Nop));
+                matcher.SetInstructionAndAdvance(new CodeInstruction(OpCodes.Nop));
+            }
+            else
+                L.LogWarning(
+                    "Didn't find SaveManager.instance.Save(bool) call to patch in WorldManager.EndOfMonthRoutine"
+                );
+            return matcher.InstructionEnumeration();
+        }
+
+        public static void EndOfMonthAutosave()
+        {
+            if (WorldManager.instance.CurrentMonth % autosaveFrequency.Value == 0)
+            {
+                SaveManager.instance.Save(true);
+            }
         }
 
         public static IEnumerator FeedVillagers()

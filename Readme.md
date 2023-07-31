@@ -17,6 +17,7 @@ There also is a configuration option to reduce or disable saving at the end of t
 
 ## Changelog
 
+- v1.2.2: Fix game not getting saved at all if the moon number isn't divisible by the autosave frequency
 - v1.2.1: Don't unpatch when exiting the game
 - v1.2.0: Steam Workshop Support
 - v1.1.2: Don't consume Hotpot
