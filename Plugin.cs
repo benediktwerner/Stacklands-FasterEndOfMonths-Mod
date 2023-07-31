@@ -35,10 +35,6 @@ namespace FasterEndOfMonths
             Harmony.PatchAll(typeof(Plugin));
         }
 
-        public void OnDestroy()
-        {
-            Harmony.UnpatchSelf();
-        }
 
         [HarmonyPrefix]
         [HarmonyPatch(typeof(EndOfMonthCutscenes), nameof(EndOfMonthCutscenes.FeedVillagers))]
